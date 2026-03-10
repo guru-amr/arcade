@@ -11,7 +11,6 @@ public class Student {
     private Long id;
 
     @Column(unique = true, nullable = false)
-    @Index(name = "idx_student_email")
     private String email;
 
     @Column(nullable = false)
