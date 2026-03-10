@@ -24,7 +24,9 @@ public class StudentOrderController {
 
     @GetMapping
     public ResponseEntity<List<OrderDtos.StudentOrderItem>> getMyOrders(
-            @RequestHeader(value = "Authorization", required = false) String authHeader
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
     ) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return ResponseEntity.status(401).build();

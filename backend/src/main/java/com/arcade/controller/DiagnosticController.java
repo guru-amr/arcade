@@ -12,6 +12,11 @@ import java.util.Map;
 @CrossOrigin(origins = "*")
 public class DiagnosticController {
 
+    @GetMapping("/health")
+    public ResponseEntity<Map<String, String>> health() {
+        return ResponseEntity.ok(Map.of("status", "UP"));
+    }
+
     @GetMapping("/auth-check")
     public ResponseEntity<Map<String, Object>> checkAuth() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
