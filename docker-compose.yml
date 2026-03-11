@@ -1,0 +1,44 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: arcade_db
+      MYSQL_USER: arcade_user
+      MYSQL_PASSWORD: arcade_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      ARCADE_DB_URL: jdbc:mysql://mysql:3306/arcade_db
+      ARCADE_DB_USERNAME: arcade_user
+      ARCADE_DB_PASSWORD: arcade_password
+      ARCADE_JWT_SECRET: YXJjYWRlLXNlY3JldC1rZXktZm9yLWp3dC10b2tlbi1zaWduaW5nLW11c3QtYmUtbG9uZy1lbm91Z2g=
+      ARCADE_UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  mysql_data:
+  uploads_data:
