@@ -8,41 +8,41 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
 public class RateLimitFilter implements Filter {
 
-    private final Map<String, AtomicInteger> requestCounts = new ConcurrentHashMap<>();
-    private final int MAX_REQUESTS_PER_MINUTE = 60;
+    private static final int MAX_REQUESTS_PER_MINUTE = 60;
+    private static final long WINDOW_MS = 60_000L;
+
+    private final Map<String, long[]> requestWindows = new ConcurrentHashMap<>();
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
             throws IOException, ServletException {
-        
+
         HttpServletRequest httpRequest = (HttpServletRequest) request;
         HttpServletResponse httpResponse = (HttpServletResponse) response;
-        
+
         String clientIp = httpRequest.getRemoteAddr();
-        
-        AtomicInteger count = requestCounts.computeIfAbsent(clientIp, k -> new AtomicInteger(0));
-        
-        if (count.incrementAndGet() > MAX_REQUESTS_PER_MINUTE) {
-            httpResponse.setStatus(429); // Too Many Requests
-            httpResponse.getWriter().write("{\"error\":\"Rate limit exceeded\"}");
+        long now = System.currentTimeMillis();
+
+        requestWindows.compute(clientIp, (ip, window) -> {
+            if (window == null || now - window[0] > WINDOW_MS) {
+                return new long[]{now, 1};
+            }
+            window[1]++;
+            return window;
+        });
+
+        long[] window = requestWindows.get(clientIp);
+        if (window[1] > MAX_REQUESTS_PER_MINUTE) {
+            httpResponse.setStatus(429);
+            httpResponse.setContentType("application/json");
+            httpResponse.getWriter().write("{\"error\":\"Rate limit exceeded. Try again in a minute.\"}");
             return;
         }
-        
+
         chain.doFilter(request, response);
-        
-        // Reset counter after 1 minute (simplified - use Redis in production)
-        new Thread(() -> {
-            try {
-                Thread.sleep(60000);
-                requestCounts.remove(clientIp);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }).start();
     }
 }

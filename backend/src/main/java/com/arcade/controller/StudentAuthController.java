@@ -31,6 +31,13 @@ public class StudentAuthController {
         String name = body.get("name");
         String phone = body.get("phone");
 
+        if (email == null || email.isBlank() || password == null || password.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Email and password are required"));
+        }
+        if (password.length() < 6) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Password must be at least 6 characters"));
+        }
+
         if (studentRepository.findByEmail(email).isPresent()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Email already exists"));
         }
@@ -50,6 +57,10 @@ public class StudentAuthController {
     public ResponseEntity<Map<String, String>> login(@RequestBody Map<String, String> body) {
         String email = body.get("email");
         String password = body.get("password");
+
+        if (email == null || email.isBlank() || password == null || password.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Email and password are required"));
+        }
 
         Student student = studentRepository.findByEmail(email).orElse(null);
         if (student == null || !passwordEncoder.matches(password, student.getPasswordHash())) {

@@ -6,23 +6,15 @@ import com.arcade.model.Student;
 import com.arcade.repository.PrintOrderRepository;
 import com.arcade.repository.StudentRepository;
 import com.arcade.security.JwtService;
+import com.arcade.service.FileStorageService;
 import jakarta.transaction.Transactional;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
 import java.math.BigDecimal;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.time.Instant;
-import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 @RestController
@@ -33,16 +25,16 @@ public class OrderController {
     private final PrintOrderRepository printOrderRepository;
     private final StudentRepository studentRepository;
     private final JwtService jwtService;
+    private final FileStorageService fileStorageService;
 
-    @Value("${arcade.upload-dir}")
-    private String uploadDir;
-
-    public OrderController(PrintOrderRepository printOrderRepository, 
-                          StudentRepository studentRepository,
-                          JwtService jwtService) {
+    public OrderController(PrintOrderRepository printOrderRepository,
+                           StudentRepository studentRepository,
+                           JwtService jwtService,
+                           FileStorageService fileStorageService) {
         this.printOrderRepository = printOrderRepository;
         this.studentRepository = studentRepository;
         this.jwtService = jwtService;
+        this.fileStorageService = fileStorageService;
     }
 
     @PostMapping(path = "/create", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -60,34 +52,21 @@ public class OrderController {
             @RequestParam("studentPhone") String studentPhone,
             @RequestHeader(value = "Authorization", required = false) String authHeader
     ) {
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "File is required"));
+        }
+        if (!"application/pdf".equalsIgnoreCase(file.getContentType())) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Only PDF files are allowed"));
+        }
+
         try {
-            System.out.println("Received order creation request");
-            
-            if (file == null || file.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("message", "File is required"));
-            }
-            
-            if (!"application/pdf".equalsIgnoreCase(file.getContentType())) {
-                System.err.println("Invalid file type: " + file.getContentType());
-                return ResponseEntity.badRequest().body(Map.of("message", "Only PDF files are allowed"));
-            }
-
-            Path uploadPath = Paths.get(uploadDir);
-            if (!Files.exists(uploadPath)) {
-                Files.createDirectories(uploadPath);
-            }
-
-            String originalFilename = StringUtils.cleanPath(file.getOriginalFilename());
-            String storedFileName = UUID.randomUUID() + "-" + originalFilename;
-            Path target = uploadPath.resolve(storedFileName);
-            Files.copy(file.getInputStream(), target);
-
+            String filePath = fileStorageService.storeFile(file);
             BigDecimal amount = calculateAmount(pages, copies, colorMode, sides);
 
             PrintOrder order = new PrintOrder();
             order.setPickupCode(generatePickupCode());
-            order.setFilePath(target.toString());
-            order.setFileName(originalFilename);
+            order.setFilePath(filePath);
+            order.setFileName(file.getOriginalFilename());
             order.setCopies(copies);
             order.setColorMode(colorMode);
             order.setSides(sides);
@@ -99,30 +78,18 @@ public class OrderController {
             order.setStatus("NEW");
             order.setPaymentStatus("PENDING");
             order.setAmount(amount);
-            
+
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
                 try {
                     String token = authHeader.substring(7);
                     String email = jwtService.extractUsername(token);
                     studentRepository.findByEmail(email).ifPresent(order::setStudent);
-                } catch (Exception e) {
-                    System.err.println("Error linking student: " + e.getMessage());
-                }
+                } catch (Exception ignored) {}
             }
 
             PrintOrder saved = printOrderRepository.save(order);
-            System.out.println("Order saved with ID: " + saved.getId());
-
-            OrderDtos.CreateOrderResponse response =
-                    new OrderDtos.CreateOrderResponse(saved.getId(), saved.getPickupCode(), amount);
-            return ResponseEntity.ok(response);
-        } catch (IOException e) {
-            System.err.println("Error uploading file: " + e.getMessage());
-            e.printStackTrace();
-            return ResponseEntity.internalServerError().body(Map.of("message", "Failed to upload file"));
+            return ResponseEntity.ok(new OrderDtos.CreateOrderResponse(saved.getId(), saved.getPickupCode(), amount));
         } catch (Exception e) {
-            System.err.println("Error creating order: " + e.getMessage());
-            e.printStackTrace();
             return ResponseEntity.internalServerError().body(Map.of("message", "Failed to create order: " + e.getMessage()));
         }
     }
@@ -133,20 +100,17 @@ public class OrderController {
             @PathVariable Long orderId,
             @RequestBody OrderDtos.ConfirmPaymentRequest request
     ) {
-        Optional<PrintOrder> optionalOrder = printOrderRepository.findById(orderId);
-        if (optionalOrder.isEmpty()) {
-            return ResponseEntity.notFound().build();
-        }
-        PrintOrder order = optionalOrder.get();
-        if ("SUCCESS".equalsIgnoreCase(request.paymentStatus())) {
-            order.setPaymentStatus("SUCCESS");
-            order.setStatus("PAID");
-            order.setPaymentReference(request.paymentReference());
-        } else {
-            order.setPaymentStatus(request.paymentStatus());
-        }
-        printOrderRepository.save(order);
-        return ResponseEntity.ok().build();
+        return printOrderRepository.findById(orderId).map(order -> {
+            if ("SUCCESS".equalsIgnoreCase(request.paymentStatus())) {
+                order.setPaymentStatus("SUCCESS");
+                order.setStatus("PAID");
+                order.setPaymentReference(request.paymentReference());
+            } else {
+                order.setPaymentStatus(request.paymentStatus());
+            }
+            printOrderRepository.save(order);
+            return ResponseEntity.ok().<Void>build();
+        }).orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @GetMapping("/{orderId}")
@@ -170,12 +134,8 @@ public class OrderController {
     }
 
     private BigDecimal calculateAmount(int pages, int copies, String colorMode, String sides) {
-        double pricePerPage;
-        if ("COLOR".equalsIgnoreCase(colorMode)) {
-            pricePerPage = 10.0;
-        } else {
-            pricePerPage = "DOUBLE".equalsIgnoreCase(sides) ? 1.5 : 1.2;
-        }
+        double pricePerPage = "COLOR".equalsIgnoreCase(colorMode) ? 10.0
+                : "DOUBLE".equalsIgnoreCase(sides) ? 1.5 : 1.2;
         return BigDecimal.valueOf(pricePerPage * Math.max(pages, 1) * Math.max(copies, 1));
     }
 
@@ -183,4 +143,3 @@ public class OrderController {
         return UUID.randomUUID().toString().replaceAll("-", "").substring(0, 8).toUpperCase();
     }
 }
-

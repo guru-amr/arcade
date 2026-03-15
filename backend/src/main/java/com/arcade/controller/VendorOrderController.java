@@ -93,12 +93,17 @@ public class VendorOrderController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    private static final List<String> ALLOWED_STATUSES = List.of("PAID", "READY_FOR_PICKUP", "COMPLETED");
+
     @PatchMapping("/{orderId}/status")
-    public ResponseEntity<Void> updateStatus(
+    public ResponseEntity<?> updateStatus(
             @PathVariable Long orderId,
             @RequestBody Map<String, String> body
     ) {
         String status = body.get("status");
+        if (status == null || !ALLOWED_STATUSES.contains(status)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid status. Allowed: " + ALLOWED_STATUSES));
+        }
         return printOrderRepository.findById(orderId)
                 .map(o -> {
                     o.setStatus(status);
