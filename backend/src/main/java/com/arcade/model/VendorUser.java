@@ -8,7 +8,9 @@ import org.hibernate.annotations.CreationTimestamp;
 import java.time.Instant;
 
 @Entity
-@Table(name = "vendor_users")
+@Table(name = "vendor_users", indexes = {
+    @Index(name = "idx_username", columnList = "username")
+})
 @Getter
 @Setter
 public class VendorUser {

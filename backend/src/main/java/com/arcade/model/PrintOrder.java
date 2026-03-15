@@ -11,10 +11,12 @@ import java.time.Instant;
 
 @Entity
 @Table(name = "print_orders", indexes = {
+    @Index(name = "idx_pickup_code", columnList = "pickupCode"),
     @Index(name = "idx_student_email", columnList = "studentEmail"),
     @Index(name = "idx_status", columnList = "status"),
     @Index(name = "idx_created_at", columnList = "createdAt"),
-    @Index(name = "idx_payment_status", columnList = "paymentStatus")
+    @Index(name = "idx_payment_status", columnList = "paymentStatus"),
+    @Index(name = "idx_status_created", columnList = "status, createdAt")
 })
 @Getter
 @Setter
